@@ -1,0 +1,51 @@
+version: "3.3"
+services:
+  export-metrices:
+    image: "prom/node-exporter:v1.3.1"
+    container_name: "node-exporter"
+    network_mode: "host"
+    volumes:
+      - "/proc:/host/proc:ro"
+      - "/sys:/host/sys:ro"
+      - "/:/host/rootfs:ro"
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/rootfs"
+      - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|etc)($$|/)"
+    restart: "always"
+
+  export-logs:
+    image: "grafana/promtail:main"
+    container_name: "promtail"
+    network_mode: "host"
+    volumes:
+      - "/var/log/:/host/var/log/"
+    environment:
+      - LOKI_IP=${LOKI_IP}
+    extra_hosts:
+      - loki:${LOKI_IP}
+    command:
+      - "--config.file=/etc/promtail/config.yml"
+      - |-
+        server:
+          http_listen_port: 9080
+          grpc_listen_port: 0
+        
+        positions:
+          filename: /tmp/positions.yaml
+        
+        clients:
+          - url: http://${LOKI_IP}:3100/loki/api/v1/push
+        
+        scrape_configs:
+          - job_name: system_logs
+            static_configs:
+              - targets:
+                  - localhost
+                labels:
+                  job: varlogs
+                  __path__: /host/var/log/*log
+    restart: "always"
+
+
