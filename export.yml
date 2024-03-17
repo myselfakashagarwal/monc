@@ -1,6 +1,6 @@
 version: "3.3"
 services:
-  export-metrices:
+  export-metrics:
     image: "prom/node-exporter:v1.3.1"
     container_name: "node-exporter"
     network_mode: "host"
@@ -20,32 +20,15 @@ services:
     container_name: "promtail"
     network_mode: "host"
     volumes:
-      - "/var/log/:/host/var/log/"
+      - "/tmp:/tmp:rw"
+      - "/var/log:/host/var/log:ro"
+      - "${PROMTAIL_CONFIG}:/etc/promtail/config.yml"
     environment:
-      - LOKI_IP=${LOKI_IP}
+      - "LOKI_IP=${LOKI_IP}"
+      - "PROMTAIL_CONFIG=${PROMTAIL_CONFIG}"
     extra_hosts:
-      - loki:${LOKI_IP}
+      - "loki:${LOKI_IP}"
     command:
       - "--config.file=/etc/promtail/config.yml"
-      - |-
-        server:
-          http_listen_port: 9080
-          grpc_listen_port: 0
-        
-        positions:
-          filename: /tmp/positions.yaml
-        
-        clients:
-          - url: http://${LOKI_IP}:3100/loki/api/v1/push
-        
-        scrape_configs:
-          - job_name: system_logs
-            static_configs:
-              - targets:
-                  - localhost
-                labels:
-                  job: varlogs
-                  __path__: /host/var/log/*log
     restart: "always"
-
 
