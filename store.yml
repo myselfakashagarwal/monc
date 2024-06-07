@@ -22,15 +22,15 @@ services:
     image: "grafana/loki:latest"
     container_name: "loki"
     ports:
-      - "9080:9080"
+      - "3100:3100"
     expose:
-      - "9080"
+      - "3100"
     environment:
       - "LOKI_CONFIG=${LOKI_CONFIG}"
       - "PROMTAIL_IP=${PROMTAIL_IP}"
     volumes:
       - "logs_storage:/tmp/loki:rw"
-      - "${LOKI_CONFIG}:/etc/loki/local-config.yaml"
+      - "${LOKI_CONFIG}:/etc/loki/loki.yml"
     restart: "always"
 volumes:
   metrics_storage:
