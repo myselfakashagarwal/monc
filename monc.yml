@@ -86,6 +86,17 @@ services:
       - "store"
       - "logs"
       - "monc"
+  visualize:
+    image: "grafana/grafana:11.0.0-ubuntu"
+    container_name: "visualize-container"
+    ports:
+      - "3000:3000"
+    expose:
+      - "3000"
+    restart: "always"
+    profiles:
+      - "visualize"
+      - "monc"
 
 volumes:
   stored-metrics:
