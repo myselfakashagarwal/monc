@@ -1,7 +1,7 @@
 version: "3.3"
 services:
   store-metrics:
-    image: "prom/prometheus:latest"
+    image: "prom/prometheus:v2.51.0"
     container_name: "prometheus"
     ports:
       - "9090:9090"
@@ -19,7 +19,7 @@ services:
     restart: "always"
 
   store-logs:
-    image: "grafana/loki:latest"
+    image: "grafana/loki:2.8.0"
     container_name: "loki"
     ports:
       - "3100:3100"

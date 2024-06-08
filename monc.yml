@@ -4,10 +4,6 @@ services:
     image: "prom/node-exporter:v1.3.1"
     container_name: "export-metrics-container"
     network_mode: "host" 
-    ports:
-      - "9100:9100"
-    expose:
-      - "9100"
     volumes:
       - "/proc:/host/proc:ro"
       - "/sys:/host/sys:ro"
@@ -19,8 +15,9 @@ services:
       - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|etc)($$|/)"
     restart: "always"
     profiles:
-      - "metrics"
       - "export-metrics"
+      - "export"
+      - "metrics"
       - "monc"
 
   export-logs:
@@ -30,10 +27,6 @@ services:
       - "LOKI_IP=${LOKI_IP}"
       - "PROMTAIL_CONFIG=${PROMTAIL_CONFIG}"
     network_mode: "host"
-    ports:
-      - "9080:9080"
-    expose:
-      - "9080"
     extra_hosts:
       - "loki:${LOKI_IP}"
     volumes:
@@ -44,8 +37,9 @@ services:
       - "--config.file=/etc/promtail/promtail.yml"
     restart: "always"
     profiles:
-      - "logs"
       - "export-logs"
+      - "export"
+      - "logs"
       - "monc"
 
   store-metrics:
@@ -54,7 +48,6 @@ services:
     environment:
       - "EXPORTER_IP=${EXPORTER_IP}"
       - "PROMETHEUS_CONFIG=${PROMETHEUS_CONFIG}"
-    network_mode: "host"
     ports:
       - "9090:9090"
     expose:
@@ -67,8 +60,9 @@ services:
       - "--storage.tsdb.path=/prometheus"
     restart: "always"
     profiles:
-      - "metrics"
       - "store-metrics"
+      - "store"
+      - "metrics"
       - "monc"
   
   store-logs:
@@ -77,7 +71,6 @@ services:
     environment:
       - "LOKI_CONFIG=${LOKI_CONFIG}"
       - "PROMTAIL_IP=${PROMTAIL_IP}"
-    network_mode: "host"
     ports:
       - "3100:3100"
     expose:
@@ -89,8 +82,9 @@ services:
       - "--config.file=/etc/loki/loki.yml"
     restart: "always"
     profiles:
-      - "logs"
       - "store-logs"
+      - "store"
+      - "logs"
       - "monc"
 
 volumes:
