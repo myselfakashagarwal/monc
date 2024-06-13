@@ -43,7 +43,7 @@ services:
       - "monc"
 
   store-metrics:
-    image: "prom/prometheus:v2.41.0"
+    image: "prom/prometheus:2.41.0"
     container_name: "store-metrics-container"
     environment:
       - "EXPORTER_IP=${EXPORTER_IP}"
@@ -68,6 +68,7 @@ services:
   store-logs:
     image: "grafana/loki:2.8.0"
     container_name: "store-logs-container"
+    user: "root"
     environment:
       - "LOKI_CONFIG=${LOKI_CONFIG}"
       - "PROMTAIL_IP=${PROMTAIL_IP}"
