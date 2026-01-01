@@ -10,8 +10,7 @@ SERVICE=""
 PORT=""
 SERVICE_START=false
 INSTALL_MYSQL_EXPORTER=false
-INSTALL_TEMPLATE_SERVICE=false
-CONFIGURE_FIREWALL=false
+INSTALL_TEMPLATE_SERVICE=true
 MYSQL_HOST="localhost"
 MYSQL_PORT="3306"
 MYSQL_USER=""
@@ -56,23 +55,17 @@ check_system_compatibility() {
 
 check_and_install_script_dependencies() {
     # install wget 
-    if command -v wget > /dev/null 2>&1; then
-        echo "INFO: wget is installed"
-    else
-        echo "INFO: Installing wget..."
-        if sudo $PACKAGE_MANAGER install wget -y > /dev/null 2>&1; then
-            echo "INFO: wget installed successfully"
-        else
-            echo "FATAL: 'wget' installation failed"
+    if ! command -v wget > /dev/null 2>&1; then
+        echo "Installing wget..."
+        if ! sudo $PACKAGE_MANAGER install wget -y > /dev/null 2>&1; then
+            echo "FATAL: wget installation failed"
             exit 1
         fi
     fi
     
     # install gum 
-    if command -v gum > /dev/null 2>&1; then
-        echo "INFO: gum is installed"
-    else
-        echo "INFO: Installing gum..."
+    if ! command -v gum > /dev/null 2>&1; then
+        echo "Installing gum..."
         local gum_arch="${ARCHITECTURE}"
         if [[ ${ARCHITECTURE} == "amd64" ]]; then
             gum_arch="x86_64"
@@ -83,111 +76,147 @@ check_and_install_script_dependencies() {
         local gum_url="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/${gum_tarball}"
         
         if ! wget -q "${gum_url}"; then
-            echo "ERROR: Failed to download gum"
+            echo "FATAL: Failed to download gum"
             exit 1
         fi
         
         if ! tar -xzf "${gum_tarball}" 2>/dev/null; then
-            echo "ERROR: Failed to extract gum"
+            echo "FATAL: Failed to extract gum"
             rm -f "${gum_tarball}"
             exit 1
         fi
         
-        sudo mv "${gum_folder}"/gum /usr/local/bin/gum 2>/dev/null || {
-            echo "ERROR: Failed to move gum to /usr/local/bin"
+        if ! sudo mv "${gum_folder}"/gum /usr/local/bin/gum 2>/dev/null; then
+            echo "FATAL: Failed to install gum"
             rm -f "${gum_tarball}"
             exit 1
-        }
+        fi
         
         sudo chmod +x /usr/local/bin/gum
         rm -f "${gum_tarball}"
         rm -rf "${gum_folder}"
         
-        if command -v gum > /dev/null 2>&1; then
-            gum log --level info "gum installed successfully"
-        else
-            echo "ERROR: 'gum' installation failed"
+        if ! command -v gum > /dev/null 2>&1; then
+            echo "FATAL: gum installation verification failed"
             exit 1
         fi
+        echo "gum installed successfully"
     fi
 }
 
 ################################## ask functions  #########################################
 
-check_and_ask_task_dependencies() {
+check_and_ask_input_dependencies() {
     # check for ss (iproute2)
-    if command -v ss > /dev/null 2>&1; then
-        gum log --level info "ss is already installed"
-    else
+    if ! command -v ss > /dev/null 2>&1; then
         if gum confirm "Install 'ss' (iproute2)?" --default=yes; then
+            gum log --level info ": 'iproute2' will be installed"
             TOOLS_TO_INSTALL+=("iproute2")
-            gum log --level info "iproute2 will be installed"
         else
-            gum log --level fatal "ss not installed, it is required for the script to run"
-            exit 1
+             gum log --level warn "ss not installed, input checking might not be accurate"
         fi
     fi
     
     # check for iptables
-    if command -v iptables > /dev/null 2>&1; then
-        gum log --level info "iptables is already installed"
-    else
+    if ! command -v iptables > /dev/null 2>&1; then
         if gum confirm "Install 'iptables'?" --default=yes; then
+            gum log --level info ": 'iptables' will be installed"
             TOOLS_TO_INSTALL+=("iptables")
-            gum log --level info "iptables will be installed"
         else
-            gum log --level fatal "iptables not installed, it is required for the script to run"
-            exit 1
+            gum log --level warn "iptables not installed, input checking might not be accurate"
         fi
     fi    
      
     # check for nftables
-    if command -v nft > /dev/null 2>&1; then
-        gum log --level info "nftables is already installed"
-    else
+    if ! command -v nft > /dev/null 2>&1; then
         if gum confirm "Install 'nftables'?" --default=yes; then
+            gum log --level info ": 'nftables' will be installed"
             TOOLS_TO_INSTALL+=("nftables")
-            gum log --level info "nftables will be installed"
         else
-            gum log --level fatal "nftables not installed, it is required for the script to run"
-            exit 1
+            gum log --level warn "nftables not installed, input checking might not be accurate"
         fi
     fi
     
-    # check for mysql client
-    if command -v mysql > /dev/null 2>&1; then
-        gum log --level info "mysql client is already installed"
-    else
-        if gum confirm "Install mysql client for testing?" --default=yes; then
+    # check for mysql client - MANDATORY for connection testing
+    if ! command -v mysql > /dev/null 2>&1; then
+        if gum confirm "Install mysql client?" --default=yes; then
+            gum log --level info ": mysql client will be installed"
             if [[ ${PACKAGE_MANAGER} == "apt" ]]; then
                 TOOLS_TO_INSTALL+=("mysql-client")
             else
                 TOOLS_TO_INSTALL+=("mysql")
             fi
-            gum log --level info "mysql client will be installed"
         else
-            gum log --level warn "mysql client not installed, connection testing will be skipped"
+            gum log --level warn "mysql client not installed, input checking might not be accurate"
         fi
     fi
+}
+
+install_input_dependencies() {
+    # Install all approved tools at once
+    if [[ ${#TOOLS_TO_INSTALL[@]} -gt 0 ]]; then
+        gum log --level info "Installing ${#TOOLS_TO_INSTALL[@]} package(s): ${TOOLS_TO_INSTALL[*]}"
+        
+        if ! sudo $PACKAGE_MANAGER install -y "${TOOLS_TO_INSTALL[@]}" >/dev/null 2>&1; then
+            gum log --level error "Package installation failed"
+            exit 1
+        fi
+        
+        # Verify installations
+        for tool in "${TOOLS_TO_INSTALL[@]}"; do
+            case $tool in
+                iproute2)
+                    if command -v ss > /dev/null 2>&1; then
+                        gum log --level info "iproute2 installed successfully"
+                    else
+                        gum log --level error "iproute2 installation failed"
+                        exit 1
+                    fi
+                    ;;
+                iptables)
+                    if command -v iptables > /dev/null 2>&1; then
+                        gum log --level info "iptables installed successfully"
+                    else
+                        gum log --level error "iptables installation failed"
+                        exit 1
+                    fi
+                    ;;
+                nftables)
+                    if command -v nft > /dev/null 2>&1; then
+                        gum log --level info "nftables installed successfully"
+                    else
+                        gum log --level error "nftables installation failed"
+                        exit 1
+                    fi
+                    ;;
+                mysql|mysql-client)
+                    if command -v mysql > /dev/null 2>&1; then
+                        gum log --level info "mysql client installed successfully"
+                    else
+                        gum log --level error "mysql client installation failed"
+                        exit 1
+                    fi
+                    ;;
+            esac
+        done
+    fi
+}
+
+check_and_ask_task_dependencies() {
           
     # check for mysqld_exporter (special case - not from package manager)
     if command -v mysqld_exporter > /dev/null 2>&1; then
         gum log --level info "mysqld_exporter is already installed"
     else
         if gum confirm "Install 'mysqld_exporter'?" --default=yes; then
+            gum log --level info ": mysqld_exporter will be installed"
             INSTALL_MYSQL_EXPORTER=true
-            gum log --level info "mysqld_exporter will be installed"
         else
-            gum log --level fatal "mysqld_exporter not installed, it is required for the script to run"
+            gum log --level fatal "mysqld_exporter is required"
             exit 1
         fi
     fi
     
-    # check for required files and directories
-    if [[ ! -e template.service ]]; then
-        INSTALL_TEMPLATE_SERVICE=true
-        gum log --level warn "template.service not found, will be created"
-    fi
 }
 
 ask_task() {
@@ -195,23 +224,15 @@ ask_task() {
     if gum confirm "Create a system account for the service?" --default=yes; then
         gum log --level info "system account will be created"
     else
-        gum log --level fatal "System account creation declined, cannot proceed"
+        gum log --level fatal "System account is required"
         exit 1
     fi
     
     if gum confirm "Create systemd service?" --default=yes; then
         gum log --level info "systemd service will be created"
     else
-        gum log --level fatal "Service creation declined, cannot proceed"
+        gum log --level fatal "Systemd service is required"
         exit 1
-    fi
-    
-    if gum confirm "Configure firewall to allow traffic on the service port?" --default=yes; then
-        gum log --level info "firewall will be configured"
-        CONFIGURE_FIREWALL=true
-    else
-        gum log --level warn "firewall will not be configured"
-        CONFIGURE_FIREWALL=false
     fi
     
     if gum confirm "Start service immediately after creation?" --default=yes; then
@@ -294,29 +315,32 @@ validate_port() {
 
     # valid range (combining privileged port check)
     if (( PORT < 1024 || PORT > 65535 )); then
-        gum log --level error "Port must be between 1024 and 65535 (privileged ports below 1024 are not allowed)"
+        gum log --level error "Port must be between 1024 and 65535"
         return 1
     fi
 
     # ephemeral port range
     if [[ -f /proc/sys/net/ipv4/ip_local_port_range ]]; then
-        read EPHEMERAL_START EPHEMERAL_END < /proc/sys/net/ipv4/ip_local_port_range
-        if (( PORT >= EPHEMERAL_START && PORT <= EPHEMERAL_END )); then
-            gum log --level error "Port is in ephemeral range (${EPHEMERAL_START}-${EPHEMERAL_END})"
-            return 1
+        local EPHEMERAL_START EPHEMERAL_END
+        read -r EPHEMERAL_START EPHEMERAL_END < /proc/sys/net/ipv4/ip_local_port_range
+        if [[ -n "${EPHEMERAL_START}" ]] && [[ -n "${EPHEMERAL_END}" ]]; then
+            if (( PORT >= EPHEMERAL_START && PORT <= EPHEMERAL_END )); then
+                gum log --level error "Port is in ephemeral range (${EPHEMERAL_START}-${EPHEMERAL_END})"
+                return 1
+            fi
         fi
     fi
 
     # socket bound ports
     if ss -H -tuln 2>/dev/null | awk '{print $5}' | sed 's/.*://' | grep -qx "${PORT}"; then
-        gum log --level error "Port already in use by a running service"
+        gum log --level error "Port already in use"
         return 1
     fi
 
     # iptables NAT ports
     if command -v iptables >/dev/null 2>&1; then
         if sudo iptables -t nat -L -n 2>/dev/null | grep -q "dpt:${PORT}"; then
-            gum log --level error "Port already exposed via iptables NAT"
+            gum log --level error "Port exposed via iptables NAT"
             return 1
         fi
     fi
@@ -324,7 +348,7 @@ validate_port() {
     # nftables ports
     if command -v nft >/dev/null 2>&1; then
         if sudo nft list ruleset 2>/dev/null | grep -q "dport ${PORT}"; then
-            gum log --level error "Port already exposed via nftables"
+            gum log --level error "Port exposed via nftables"
             return 1
         fi
     fi
@@ -332,7 +356,7 @@ validate_port() {
     # docker published ports
     if command -v docker >/dev/null 2>&1; then
         if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${PORT}->"; then
-            gum log --level error "Port already published by Docker"
+            gum log --level error "Port published by Docker"
             return 1
         fi
     fi
@@ -340,6 +364,24 @@ validate_port() {
     # kubernetes NodePort range
     if (( PORT >= 30000 && PORT <= 32767 )); then
         gum log --level error "Port conflicts with Kubernetes NodePort range"
+        return 1
+    fi
+    
+    # Check systemd service files for port usage
+    local service_files=$(find /etc/systemd/system /usr/lib/systemd/system -name "*.service" 2>/dev/null)
+    
+    for service_file in ${service_files}; do
+        if [[ -f "${service_file}" ]]; then
+            if grep -qE "(--web\.listen-address=:${PORT}|--listen-address=:${PORT}|--port=${PORT}|:${PORT}[^0-9])" "${service_file}" 2>/dev/null; then
+                local service_name=$(basename "${service_file}")
+                gum log --level error "Port ${PORT} configured in ${service_name}"
+                return 1
+            fi
+        fi
+    done
+    
+    if sudo grep -r "ExecStart.*${PORT}" /etc/systemd/system/*.service /usr/lib/systemd/system/*.service 2>/dev/null | grep -v "^Binary file"; then
+        gum log --level error "Port found in systemd service"
         return 1
     fi
 }
@@ -364,6 +406,41 @@ validate_mysql_host() {
         gum log --level error "Invalid hostname or IP address"
         return 1
     fi
+    
+    # Check if localhost/127.0.0.1 is specified, verify MySQL is running locally
+    if [[ "${MYSQL_HOST}" == "localhost" ]] || [[ "${MYSQL_HOST}" == "127.0.0.1" ]] || [[ "${MYSQL_HOST}" == "::1" ]]; then
+        local mysql_running=false
+        
+        # Check if MySQL/MariaDB is running
+        if systemctl is-active --quiet mysql 2>/dev/null || \
+           systemctl is-active --quiet mysqld 2>/dev/null || \
+           systemctl is-active --quiet mariadb 2>/dev/null; then
+            mysql_running=true
+        fi
+        
+        # Check if MySQL port is listening locally
+        if ! ${mysql_running}; then
+            if ss -tuln 2>/dev/null | grep -q ":3306 "; then
+                mysql_running=true
+            fi
+        fi
+        
+        # Check if mysql.sock exists
+        if ! ${mysql_running}; then
+            if [[ -S /var/run/mysqld/mysqld.sock ]] || \
+               [[ -S /var/lib/mysql/mysql.sock ]] || \
+               [[ -S /tmp/mysql.sock ]]; then
+                mysql_running=true
+            fi
+        fi
+        
+        if ! ${mysql_running}; then
+            gum log --level error "MySQL is not running locally"
+            return 1
+        fi
+    fi
+    
+    return 0
 }
 
 input_mysql_host() {
@@ -443,11 +520,8 @@ input_mysql_password() {
 
 test_mysql_connection() {
     if ! command -v mysql > /dev/null 2>&1; then
-        gum log --level warn "mysql client not installed, skipping connection test"
         return 0
     fi
-    
-    gum log --level info "Testing MySQL connection..."
     
     local mysql_cmd="mysql -h${MYSQL_HOST} -P${MYSQL_PORT} -u${MYSQL_USER}"
     
@@ -456,24 +530,19 @@ test_mysql_connection() {
     fi
     
     if ${mysql_cmd} -e "SELECT 1;" >/dev/null 2>&1; then
-        gum log --level info "MySQL connection successful"
-        
         # Test required privileges
-        if ${mysql_cmd} -e "SHOW GLOBAL STATUS;" >/dev/null 2>&1 && \
-           ${mysql_cmd} -e "SHOW GLOBAL VARIABLES;" >/dev/null 2>&1; then
-            gum log --level info "MySQL user has required privileges"
-        else
-            gum log --level warn "MySQL user may lack required privileges (PROCESS, REPLICATION CLIENT, SELECT)"
-            gum log --level warn "Grant with: GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO '${MYSQL_USER}'@'%';"
+        if ! ${mysql_cmd} -e "SHOW GLOBAL STATUS;" >/dev/null 2>&1 || \
+           ! ${mysql_cmd} -e "SHOW GLOBAL VARIABLES;" >/dev/null 2>&1; then
+            gum log --level warn "MySQL user may lack required privileges"
         fi
         return 0
     else
         gum log --level error "MySQL connection failed"
         if gum confirm "Continue anyway?" --default=no; then
-            gum log --level warn "Proceeding without connection validation"
             return 0
         else
-            return 1
+            gum log --level fatal "MySQL connection required"
+            exit 1
         fi
     fi
 }
@@ -481,54 +550,6 @@ test_mysql_connection() {
 ############################### installations  #########################
 
 install_task_dependencies() {
-    # Install all approved tools at once
-    if [[ ${#TOOLS_TO_INSTALL[@]} -gt 0 ]]; then
-        gum log --level info "Installing ${#TOOLS_TO_INSTALL[@]} package(s): ${TOOLS_TO_INSTALL[*]}"
-        
-        if ! sudo $PACKAGE_MANAGER install -y "${TOOLS_TO_INSTALL[@]}"; then
-            gum log --level error "Package installation failed"
-            exit 1
-        fi
-        
-        # Verify installations
-        for tool in "${TOOLS_TO_INSTALL[@]}"; do
-            case $tool in
-                iproute2)
-                    if command -v ss > /dev/null 2>&1; then
-                        gum log --level info "iproute2 installed successfully"
-                    else
-                        gum log --level error "iproute2 installation failed"
-                        exit 1
-                    fi
-                    ;;
-                iptables)
-                    if command -v iptables > /dev/null 2>&1; then
-                        gum log --level info "iptables installed successfully"
-                    else
-                        gum log --level error "iptables installation failed"
-                        exit 1
-                    fi
-                    ;;
-                nftables)
-                    if command -v nft > /dev/null 2>&1; then
-                        gum log --level info "nftables installed successfully"
-                    else
-                        gum log --level error "nftables installation failed"
-                        exit 1
-                    fi
-                    ;;
-                mysql|mysql-client)
-                    if command -v mysql > /dev/null 2>&1; then
-                        gum log --level info "mysql client installed successfully"
-                    else
-                        gum log --level error "mysql client installation failed"
-                        exit 1
-                    fi
-                    ;;
-            esac
-        done
-    fi
-    
     # Install mysqld_exporter separately if needed
     if [[ ${INSTALL_MYSQL_EXPORTER} == true ]]; then
         gum log --level info "Installing mysqld_exporter..."
@@ -542,22 +563,22 @@ install_task_dependencies() {
         local me_url="https://github.com/prometheus/mysqld_exporter/releases/download/v${MYSQL_EXPORTER_VERSION}/${me_tarball}"
         
         if ! wget -q "${me_url}"; then
-            gum log --level error "Failed to download mysqld_exporter"
+            gum log --level fatal "Failed to download mysqld_exporter"
             exit 1
         fi
         
         if ! tar -xzf "${me_tarball}" 2>/dev/null; then
-            gum log --level error "Failed to extract mysqld_exporter"
+            gum log --level fatal "Failed to extract mysqld_exporter"
             rm -f "${me_tarball}"
             exit 1
         fi
         
-        sudo mv "./mysqld_exporter-${MYSQL_EXPORTER_VERSION}.${KERNEL}-${me_arch}/mysqld_exporter" /usr/local/bin/ || {
-            gum log --level error "Failed to move mysqld_exporter to /usr/local/bin"
+        if ! sudo mv "./mysqld_exporter-${MYSQL_EXPORTER_VERSION}.${KERNEL}-${me_arch}/mysqld_exporter" /usr/local/bin/; then
+            gum log --level fatal "Failed to install mysqld_exporter"
             rm -f "${me_tarball}"
             rm -rf "mysqld_exporter-${MYSQL_EXPORTER_VERSION}.${KERNEL}-${me_arch}"
             exit 1
-        }
+        fi
         
         rm -f "${me_tarball}"
         rm -rf "mysqld_exporter-${MYSQL_EXPORTER_VERSION}.${KERNEL}-${me_arch}"
@@ -565,7 +586,7 @@ install_task_dependencies() {
         if command -v mysqld_exporter > /dev/null 2>&1; then
             gum log --level info "mysqld_exporter installed successfully"
         else
-            gum log --level error "mysqld_exporter installation failed"
+            gum log --level fatal "mysqld_exporter installation verification failed"
             exit 1
         fi
     fi
@@ -590,238 +611,21 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
+        if [[ ! -e template.service ]]; then
+            gum log --level fatal "Failed to create template.service"
+            exit 1
+        fi
         gum log --level info "template.service created successfully"
     fi
 }
 
-############################### firewall functions #########################
 
-detect_active_firewall() {
-    local active_firewall=""
-    
-    # Check for firewalld
-    if command -v firewall-cmd >/dev/null 2>&1; then
-        if sudo systemctl is-active --quiet firewalld 2>/dev/null; then
-            active_firewall="firewalld"
-        fi
-    fi
-    
-    # Check for UFW
-    if command -v ufw >/dev/null 2>&1; then
-        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-            active_firewall="ufw"
-        fi
-    fi
-    
-    # Check for active iptables rules
-    if command -v iptables >/dev/null 2>&1; then
-        local rule_count=$(sudo iptables -L INPUT -n 2>/dev/null | grep -c "^ACCEPT\|^DROP\|^REJECT" || echo "0")
-        if (( rule_count > 0 )) && [[ -z "${active_firewall}" ]]; then
-            active_firewall="iptables"
-        fi
-    fi
-    
-    # Check for nftables
-    if command -v nft >/dev/null 2>&1; then
-        if sudo nft list ruleset 2>/dev/null | grep -q "type filter hook"; then
-            if [[ -z "${active_firewall}" ]]; then
-                active_firewall="nftables"
-            fi
-        fi
-    fi
-    
-    echo "${active_firewall}"
-}
-
-configure_firewalld() {
-    local port=$1
-    
-    gum log --level info "Configuring firewalld for port ${port}..."
-    
-    # Add port to firewalld
-    if ! sudo firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null; then
-        gum log --level error "Failed to add port to firewalld"
-        return 1
-    fi
-    
-    # Reload firewalld
-    if ! sudo firewall-cmd --reload 2>/dev/null; then
-        gum log --level error "Failed to reload firewalld"
-        return 1
-    fi
-    
-    # Verify the rule
-    if sudo firewall-cmd --list-ports 2>/dev/null | grep -q "${port}/tcp"; then
-        gum log --level info "Port ${port}/tcp successfully added to firewalld"
-        return 0
-    else
-        gum log --level error "Failed to verify firewalld rule"
-        return 1
-    fi
-}
-
-configure_ufw() {
-    local port=$1
-    
-    gum log --level info "Configuring UFW for port ${port}..."
-    
-    # Add port to UFW
-    if ! sudo ufw allow "${port}/tcp" 2>/dev/null; then
-        gum log --level error "Failed to add port to UFW"
-        return 1
-    fi
-    
-    # Verify the rule
-    if sudo ufw status 2>/dev/null | grep -q "${port}/tcp"; then
-        gum log --level info "Port ${port}/tcp successfully added to UFW"
-        return 0
-    else
-        gum log --level error "Failed to verify UFW rule"
-        return 1
-    fi
-}
-
-configure_iptables() {
-    local port=$1
-    
-    gum log --level info "Configuring iptables for port ${port}..."
-    
-    # Check if rule already exists
-    if sudo iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null; then
-        gum log --level info "iptables rule for port ${port} already exists"
-        return 0
-    fi
-    
-    # Add iptables rule
-    if ! sudo iptables -A INPUT -p tcp --dport "${port}" -j ACCEPT; then
-        gum log --level error "Failed to add iptables rule"
-        return 1
-    fi
-    
-    gum log --level info "iptables rule added for port ${port}/tcp"
-    
-    # Try to save iptables rules (distribution-specific)
-    if command -v iptables-save >/dev/null 2>&1; then
-        if command -v netfilter-persistent >/dev/null 2>&1; then
-            sudo netfilter-persistent save 2>/dev/null && \
-                gum log --level info "iptables rules saved with netfilter-persistent"
-        elif [[ -e /etc/sysconfig/iptables ]]; then
-            sudo iptables-save | sudo tee /etc/sysconfig/iptables >/dev/null && \
-                gum log --level info "iptables rules saved to /etc/sysconfig/iptables"
-        elif [[ -e /etc/iptables/rules.v4 ]]; then
-            sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null && \
-                gum log --level info "iptables rules saved to /etc/iptables/rules.v4"
-        else
-            gum log --level warn "Could not persist iptables rules (no save method found)"
-        fi
-    fi
-    
-    return 0
-}
-
-configure_nftables() {
-    local port=$1
-    
-    gum log --level info "Configuring nftables for port ${port}..."
-    
-    # Check if a table exists, create one if not
-    if ! sudo nft list tables 2>/dev/null | grep -q "inet filter"; then
-        gum log --level info "Creating nftables filter table..."
-        sudo nft add table inet filter
-        sudo nft add chain inet filter input { type filter hook input priority 0 \; }
-    fi
-    
-    # Add rule to allow port
-    if ! sudo nft add rule inet filter input tcp dport "${port}" accept 2>/dev/null; then
-        gum log --level error "Failed to add nftables rule"
-        return 1
-    fi
-    
-    gum log --level info "nftables rule added for port ${port}/tcp"
-    
-    # Try to save nftables rules
-    if [[ -e /etc/nftables.conf ]]; then
-        sudo nft list ruleset | sudo tee /etc/nftables.conf >/dev/null && \
-            gum log --level info "nftables rules saved to /etc/nftables.conf"
-    else
-        gum log --level warn "Could not persist nftables rules (/etc/nftables.conf not found)"
-    fi
-    
-    return 0
-}
-
-configure_firewall() {
-    if [[ ${CONFIGURE_FIREWALL} != true ]]; then
-        gum log --level info "Skipping firewall configuration"
-        return 0
-    fi
-    
-    local active_firewall=$(detect_active_firewall)
-    
-    if [[ -z "${active_firewall}" ]]; then
-        gum log --level warn "No active firewall detected"
-        gum log --level info "You may need to manually configure your firewall"
-        return 0
-    fi
-    
-    gum log --level info "Detected active firewall: ${active_firewall}"
-    
-    case "${active_firewall}" in
-        firewalld)
-            configure_firewalld "${PORT}"
-            ;;
-        ufw)
-            configure_ufw "${PORT}"
-            ;;
-        iptables)
-            configure_iptables "${PORT}"
-            ;;
-        nftables)
-            configure_nftables "${PORT}"
-            ;;
-        *)
-            gum log --level warn "Unknown firewall type: ${active_firewall}"
-            return 1
-            ;;
-    esac
-}
-
-cleanup_firewall() {
-    local port=$1
-    local active_firewall=$(detect_active_firewall)
-    
-    if [[ -z "${active_firewall}" ]]; then
-        return 0
-    fi
-    
-    gum log --level info "Removing firewall rule for port ${port}..."
-    
-    case "${active_firewall}" in
-        firewalld)
-            sudo firewall-cmd --permanent --remove-port="${port}/tcp" 2>/dev/null
-            sudo firewall-cmd --reload 2>/dev/null
-            ;;
-        ufw)
-            sudo ufw delete allow "${port}/tcp" 2>/dev/null
-            ;;
-        iptables)
-            sudo iptables -D INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null
-            ;;
-        nftables)
-            # This is complex for nftables, skip for now
-            gum log --level warn "Manual nftables cleanup may be required"
-            ;;
-    esac
-}
 
 cleanup_on_failure() {
     local service_name=$1
     gum log --level warn "Cleaning up due to failure..."
     
-    # Remove firewall rule if it was configured
-    if [[ ${CONFIGURE_FIREWALL} == true ]]; then
-        cleanup_firewall "${PORT}"
-    fi
+
     
     # Remove .my.cnf file
     if [[ -e "/home/${service_name}/.my.cnf" ]]; then
@@ -849,34 +653,10 @@ cleanup_on_failure() {
     sudo systemctl daemon-reload
 }
 
-manage_dependencies() {
-    check_system_compatibility
-    check_and_install_script_dependencies
-    check_and_ask_task_dependencies
-}
-
-get_inputs() {
-    ask_task
-    input_service
-    input_port
-    input_mysql_host
-    input_mysql_port
-    input_mysql_user
-    input_mysql_password
-    
-    # Test MySQL connection
-    until test_mysql_connection; do
-        gum log --level warn "Retrying MySQL configuration..."
-        input_mysql_host
-        input_mysql_port
-        input_mysql_user
-        input_mysql_password
-    done
-}
 
 create_service_file() {
     if [[ ! -e template.service ]]; then
-        gum log --level error "template.service file not found"
+        gum log --level fatal "template.service file not found"
         exit 1
     fi
     
@@ -892,7 +672,7 @@ create_service_file() {
              -e "s/PLACEHOLDER_HOST/${MYSQL_HOST}/g" \
              -e "s/PLACEHOLDER_MYSQL_PORT/${MYSQL_PORT}/g" \
              template.service > "${SERVICE}.service"; then
-        gum log --level error "Failed to create service file"
+        gum log --level fatal "Failed to create service file"
         exit 1
     fi
     
@@ -904,7 +684,7 @@ install_service() {
     
     # Create service user with home directory for .my.cnf
     if ! sudo useradd --system --shell /usr/sbin/nologin --create-home "${SERVICE}" 2>/dev/null; then
-        gum log --level error "Failed to create service user"
+        gum log --level fatal "Failed to create service user"
         cleanup_on_failure "${SERVICE}"
         exit 1
     fi
@@ -912,61 +692,48 @@ install_service() {
     
     # Move service file
     if ! sudo mv "${SERVICE}.service" /etc/systemd/system/; then
-        gum log --level error "Failed to move service file to /etc/systemd/system/"
+        gum log --level fatal "Failed to move service file"
         cleanup_on_failure "${SERVICE}"
         exit 1
     fi
     
     # Reload systemd
     if ! sudo systemctl daemon-reload; then
-        gum log --level error "Failed to reload systemd"
+        gum log --level fatal "Failed to reload systemd"
         cleanup_on_failure "${SERVICE}"
         exit 1
     fi
     
-    # Configure firewall before starting service
-    if ! configure_firewall; then
-        gum log --level warn "Firewall configuration failed, but continuing..."
-    fi
+
     
     # Enable and start service if requested
     if [[ ${SERVICE_START} == true ]]; then
-        if ! sudo systemctl enable "${SERVICE}"; then
-            gum log --level error "Failed to enable service"
+        if ! sudo systemctl enable "${SERVICE}" 2>/dev/null; then
+            gum log --level fatal "Failed to enable service"
             cleanup_on_failure "${SERVICE}"
             exit 1
         fi
         gum log --level info "Service enabled: ${SERVICE}"
         
-        if ! sudo systemctl start "${SERVICE}"; then
-            gum log --level error "Failed to start service"
+        if ! sudo systemctl start "${SERVICE}" 2>/dev/null; then
+            gum log --level fatal "Failed to start service"
             gum log --level info "Check status with: sudo systemctl status ${SERVICE}"
-            gum log --level info "Check logs with: sudo journalctl -u ${SERVICE} -n 50"
             cleanup_on_failure "${SERVICE}"
             exit 1
         fi
         gum log --level info "Service started: ${SERVICE}"
         
-        # Wait a moment for the service to initialize
-        sleep 2
-        
         # Show service status
         sudo systemctl status "${SERVICE}" --no-pager
-        
-        # Test if metrics endpoint is responding
-        if command -v curl >/dev/null 2>&1; then
-            gum log --level info "Testing metrics endpoint..."
-            if curl -s "http://localhost:${PORT}/metrics" | head -n 5; then
-                gum log --level info "Metrics endpoint is responding"
-            else
-                gum log --level warn "Could not reach metrics endpoint"
-            fi
-        fi
     else
         gum log --level info "Service installed but not started"
         gum log --level info "To start: sudo systemctl start ${SERVICE}"
-        gum log --level info "To enable: sudo systemctl enable ${SERVICE}"
     fi
+}
+
+manage_dependencies() {
+    check_system_compatibility
+    check_and_install_script_dependencies
 }
 
 setup_service() {
@@ -974,15 +741,40 @@ setup_service() {
     install_service
 }
 
+get_input() {
+    input_service
+    validate_service
+    input_port
+    validate_port
+    input_mysql_host
+    validate_mysql_host
+    input_mysql_port
+    validate_mysql_port
+    input_mysql_user
+    validate_mysql_user
+    input_mysql_password
+}
+
 ################################ perform tasks #########################################
 
 perform_task() {
     manage_dependencies
-    get_inputs
+    check_and_ask_task_dependencies
+    ask_task
+    check_and_ask_input_dependencies
+    install_input_dependencies
+    get_input
+    test_mysql_connection
+    
+    # Log final configuration
+    gum log --level info "Configuration complete"
+    gum log --level info "Service: ${SERVICE}"
+    gum log --level info "Port: ${PORT}"
+    gum log --level info "MySQL: ${MYSQL_USER}@${MYSQL_HOST}:${MYSQL_PORT}"
+    
     install_task_dependencies
     setup_service
-    gum log --level info "✓ MySQL Exporter service installation completed successfully!"
-    gum log --level info "Metrics available at: http://localhost:${PORT}/metrics"
+    gum log --level info "✓ Service installation completed successfully!"
 }
 
 ########################## calls #########################################################

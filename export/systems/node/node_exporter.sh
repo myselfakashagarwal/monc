@@ -10,8 +10,8 @@ SERVICE=""
 PORT=""
 SERVICE_START=false
 INSTALL_NODE_EXPORTER=false
-INSTALL_TEMPLATE_SERVICE=false
-CONFIGURE_FIREWALL=false
+INSTALL_TEMPLATE_SERVICE=true
+
 declare -a TOOLS_TO_INSTALL=()
 
 # Versions (centralized for easy updates)
@@ -110,7 +110,7 @@ check_and_install_script_dependencies() {
 
 ################################## ask functions  #########################################
 
-check_and_ask_task_dependencies() {
+check_and_ask_input_dependencies() {
     # check for ss (iproute2)
     if command -v ss > /dev/null 2>&1; then
         gum log --level info "ss is already installed"
@@ -119,8 +119,7 @@ check_and_ask_task_dependencies() {
             TOOLS_TO_INSTALL+=("iproute2")
             gum log --level info "iproute2 will be installed"
         else
-            gum log --level fatal "ss not installed, it is required for the script to run"
-            exit 1
+            gum log --level warn "ss not installed, input checking might not be accurate"
         fi
     fi
     
@@ -132,11 +131,10 @@ check_and_ask_task_dependencies() {
             TOOLS_TO_INSTALL+=("iptables")
             gum log --level info "iptables will be installed"
         else
-            gum log --level fatal "iptables not installed, it is required for the script to run"
-            exit 1
+            gum log --level warn "iptables not installed, input checking might not be accurate"
         fi
-    fi    
-     
+    fi
+    
     # check for nftables
     if command -v nft > /dev/null 2>&1; then
         gum log --level info "nftables is already installed"
@@ -145,11 +143,55 @@ check_and_ask_task_dependencies() {
             TOOLS_TO_INSTALL+=("nftables")
             gum log --level info "nftables will be installed"
         else
-            gum log --level fatal "nftables not installed, it is required for the script to run"
-            exit 1
+            gum log --level warn "nftables not installed, input checking might not be accurate"
         fi
     fi
-          
+}
+
+install_input_dependencies() {
+    # Install all approved tools at once
+    if [[ ${#TOOLS_TO_INSTALL[@]} -gt 0 ]]; then
+        gum log --level info "Installing ${#TOOLS_TO_INSTALL[@]} package(s): ${TOOLS_TO_INSTALL[*]}"
+        
+        if ! sudo $PACKAGE_MANAGER install -y "${TOOLS_TO_INSTALL[@]}"; then
+            gum log --level error "Package installation failed"
+            exit 1
+        fi
+        
+        # Verify installations
+        for tool in "${TOOLS_TO_INSTALL[@]}"; do
+            case $tool in
+                iproute2)
+                    if command -v ss > /dev/null 2>&1; then
+                        gum log --level info "iproute2 installed successfully"
+                    else
+                        gum log --level error "iproute2 installation failed"
+                        exit 1
+                    fi
+                    ;;
+                iptables)
+                    if command -v iptables > /dev/null 2>&1; then
+                        gum log --level info "iptables installed successfully"
+                    else
+                        gum log --level error "iptables installation failed"
+                        exit 1
+                    fi
+                    ;;
+                nftables)
+                    if command -v nft > /dev/null 2>&1; then
+                        gum log --level info "nftables installed successfully"
+                    else
+                        gum log --level error "nftables installation failed"
+                        exit 1
+                    fi
+                    ;;
+            esac
+        done
+    fi
+} 
+
+check_and_ask_task_dependencies() {
+ 
     # check for node_exporter (special case - not from package manager)
     if command -v node_exporter > /dev/null 2>&1; then
         gum log --level info "node_exporter is already installed"
@@ -163,11 +205,6 @@ check_and_ask_task_dependencies() {
         fi
     fi
     
-    # check for required files and directories
-    if [[ ! -e template.service ]]; then
-        INSTALL_TEMPLATE_SERVICE=true
-        gum log --level warn "template.service not found, will be created"
-    fi
 }
 
 ask_task() {
@@ -186,13 +223,7 @@ ask_task() {
         exit 1
     fi
     
-    if gum confirm "Configure firewall to allow traffic on the service port?" --default=yes; then
-        gum log --level info "firewall will be configured"
-        CONFIGURE_FIREWALL=true
-    else
-        gum log --level warn "firewall will not be configured"
-        CONFIGURE_FIREWALL=false
-    fi
+
     
     if gum confirm "Start service immediately after creation?" --default=yes; then
         gum log --level info "service will be started immediately after creation"
@@ -334,47 +365,9 @@ input_port() {
 
 ############################### installations  #########################
 
+
 install_task_dependencies() {
-    # Install all approved tools at once
-    if [[ ${#TOOLS_TO_INSTALL[@]} -gt 0 ]]; then
-        gum log --level info "Installing ${#TOOLS_TO_INSTALL[@]} package(s): ${TOOLS_TO_INSTALL[*]}"
-        
-        if ! sudo $PACKAGE_MANAGER install -y "${TOOLS_TO_INSTALL[@]}"; then
-            gum log --level error "Package installation failed"
-            exit 1
-        fi
-        
-        # Verify installations
-        for tool in "${TOOLS_TO_INSTALL[@]}"; do
-            case $tool in
-                iproute2)
-                    if command -v ss > /dev/null 2>&1; then
-                        gum log --level info "iproute2 installed successfully"
-                    else
-                        gum log --level error "iproute2 installation failed"
-                        exit 1
-                    fi
-                    ;;
-                iptables)
-                    if command -v iptables > /dev/null 2>&1; then
-                        gum log --level info "iptables installed successfully"
-                    else
-                        gum log --level error "iptables installation failed"
-                        exit 1
-                    fi
-                    ;;
-                nftables)
-                    if command -v nft > /dev/null 2>&1; then
-                        gum log --level info "nftables installed successfully"
-                    else
-                        gum log --level error "nftables installation failed"
-                        exit 1
-                    fi
-                    ;;
-            esac
-        done
-    fi
-    
+
     # Install node_exporter separately if needed
     if [[ ${INSTALL_NODE_EXPORTER} == true ]]; then
         gum log --level info "Installing node_exporter..."
@@ -438,235 +431,13 @@ EOF
     fi
 }
 
-############################### firewall functions #########################
 
-detect_active_firewall() {
-    local active_firewall=""
-    
-    # Check for firewalld
-    if command -v firewall-cmd >/dev/null 2>&1; then
-        if sudo systemctl is-active --quiet firewalld 2>/dev/null; then
-            active_firewall="firewalld"
-        fi
-    fi
-    
-    # Check for UFW
-    if command -v ufw >/dev/null 2>&1; then
-        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-            active_firewall="ufw"
-        fi
-    fi
-    
-    # Check for active iptables rules
-    if command -v iptables >/dev/null 2>&1; then
-        local rule_count=$(sudo iptables -L INPUT -n 2>/dev/null | grep -c "^ACCEPT\|^DROP\|^REJECT" || echo "0")
-        if (( rule_count > 0 )) && [[ -z "${active_firewall}" ]]; then
-            active_firewall="iptables"
-        fi
-    fi
-    
-    # Check for nftables
-    if command -v nft >/dev/null 2>&1; then
-        if sudo nft list ruleset 2>/dev/null | grep -q "type filter hook"; then
-            if [[ -z "${active_firewall}" ]]; then
-                active_firewall="nftables"
-            fi
-        fi
-    fi
-    
-    echo "${active_firewall}"
-}
-
-configure_firewalld() {
-    local port=$1
-    
-    gum log --level info "Configuring firewalld for port ${port}..."
-    
-    # Add port to firewalld
-    if ! sudo firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null; then
-        gum log --level error "Failed to add port to firewalld"
-        return 1
-    fi
-    
-    # Reload firewalld
-    if ! sudo firewall-cmd --reload 2>/dev/null; then
-        gum log --level error "Failed to reload firewalld"
-        return 1
-    fi
-    
-    # Verify the rule
-    if sudo firewall-cmd --list-ports 2>/dev/null | grep -q "${port}/tcp"; then
-        gum log --level info "Port ${port}/tcp successfully added to firewalld"
-        return 0
-    else
-        gum log --level error "Failed to verify firewalld rule"
-        return 1
-    fi
-}
-
-configure_ufw() {
-    local port=$1
-    
-    gum log --level info "Configuring UFW for port ${port}..."
-    
-    # Add port to UFW
-    if ! sudo ufw allow "${port}/tcp" 2>/dev/null; then
-        gum log --level error "Failed to add port to UFW"
-        return 1
-    fi
-    
-    # Verify the rule
-    if sudo ufw status 2>/dev/null | grep -q "${port}/tcp"; then
-        gum log --level info "Port ${port}/tcp successfully added to UFW"
-        return 0
-    else
-        gum log --level error "Failed to verify UFW rule"
-        return 1
-    fi
-}
-
-configure_iptables() {
-    local port=$1
-    
-    gum log --level info "Configuring iptables for port ${port}..."
-    
-    # Check if rule already exists
-    if sudo iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null; then
-        gum log --level info "iptables rule for port ${port} already exists"
-        return 0
-    fi
-    
-    # Add iptables rule
-    if ! sudo iptables -A INPUT -p tcp --dport "${port}" -j ACCEPT; then
-        gum log --level error "Failed to add iptables rule"
-        return 1
-    fi
-    
-    gum log --level info "iptables rule added for port ${port}/tcp"
-    
-    # Try to save iptables rules (distribution-specific)
-    if command -v iptables-save >/dev/null 2>&1; then
-        if command -v netfilter-persistent >/dev/null 2>&1; then
-            sudo netfilter-persistent save 2>/dev/null && \
-                gum log --level info "iptables rules saved with netfilter-persistent"
-        elif [[ -e /etc/sysconfig/iptables ]]; then
-            sudo iptables-save | sudo tee /etc/sysconfig/iptables >/dev/null && \
-                gum log --level info "iptables rules saved to /etc/sysconfig/iptables"
-        elif [[ -e /etc/iptables/rules.v4 ]]; then
-            sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null && \
-                gum log --level info "iptables rules saved to /etc/iptables/rules.v4"
-        else
-            gum log --level warn "Could not persist iptables rules (no save method found)"
-        fi
-    fi
-    
-    return 0
-}
-
-configure_nftables() {
-    local port=$1
-    
-    gum log --level info "Configuring nftables for port ${port}..."
-    
-    # Check if a table exists, create one if not
-    if ! sudo nft list tables 2>/dev/null | grep -q "inet filter"; then
-        gum log --level info "Creating nftables filter table..."
-        sudo nft add table inet filter
-        sudo nft add chain inet filter input { type filter hook input priority 0 \; }
-    fi
-    
-    # Add rule to allow port
-    if ! sudo nft add rule inet filter input tcp dport "${port}" accept 2>/dev/null; then
-        gum log --level error "Failed to add nftables rule"
-        return 1
-    fi
-    
-    gum log --level info "nftables rule added for port ${port}/tcp"
-    
-    # Try to save nftables rules
-    if [[ -e /etc/nftables.conf ]]; then
-        sudo nft list ruleset | sudo tee /etc/nftables.conf >/dev/null && \
-            gum log --level info "nftables rules saved to /etc/nftables.conf"
-    else
-        gum log --level warn "Could not persist nftables rules (/etc/nftables.conf not found)"
-    fi
-    
-    return 0
-}
-
-configure_firewall() {
-    if [[ ${CONFIGURE_FIREWALL} != true ]]; then
-        gum log --level info "Skipping firewall configuration"
-        return 0
-    fi
-    
-    local active_firewall=$(detect_active_firewall)
-    
-    if [[ -z "${active_firewall}" ]]; then
-        gum log --level warn "No active firewall detected"
-        gum log --level info "You may need to manually configure your firewall"
-        return 0
-    fi
-    
-    gum log --level info "Detected active firewall: ${active_firewall}"
-    
-    case "${active_firewall}" in
-        firewalld)
-            configure_firewalld "${PORT}"
-            ;;
-        ufw)
-            configure_ufw "${PORT}"
-            ;;
-        iptables)
-            configure_iptables "${PORT}"
-            ;;
-        nftables)
-            configure_nftables "${PORT}"
-            ;;
-        *)
-            gum log --level warn "Unknown firewall type: ${active_firewall}"
-            return 1
-            ;;
-    esac
-}
-
-cleanup_firewall() {
-    local port=$1
-    local active_firewall=$(detect_active_firewall)
-    
-    if [[ -z "${active_firewall}" ]]; then
-        return 0
-    fi
-    
-    gum log --level info "Removing firewall rule for port ${port}..."
-    
-    case "${active_firewall}" in
-        firewalld)
-            sudo firewall-cmd --permanent --remove-port="${port}/tcp" 2>/dev/null
-            sudo firewall-cmd --reload 2>/dev/null
-            ;;
-        ufw)
-            sudo ufw delete allow "${port}/tcp" 2>/dev/null
-            ;;
-        iptables)
-            sudo iptables -D INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null
-            ;;
-        nftables)
-            # This is complex for nftables, skip for now
-            gum log --level warn "Manual nftables cleanup may be required"
-            ;;
-    esac
-}
 
 cleanup_on_failure() {
     local service_name=$1
     gum log --level warn "Cleaning up due to failure..."
     
-    # Remove firewall rule if it was configured
-    if [[ ${CONFIGURE_FIREWALL} == true ]]; then
-        cleanup_firewall "${PORT}"
-    fi
-    
+
     # Remove service file if it exists
     if [[ -e "/etc/systemd/system/${service_name}.service" ]]; then
         sudo rm -f "/etc/systemd/system/${service_name}.service"
@@ -740,10 +511,6 @@ install_service() {
         exit 1
     fi
     
-    # Configure firewall before starting service
-    if ! configure_firewall; then
-        gum log --level warn "Firewall configuration failed, but continuing..."
-    fi
     
     # Enable and start service if requested
     if [[ ${SERVICE_START} == true ]]; then
@@ -779,6 +546,8 @@ setup_service() {
 
 perform_task() {
     manage_dependencies
+    check_and_ask_input_dependencies
+    install_input_dependencies
     get_inputs
     install_task_dependencies
     setup_service
