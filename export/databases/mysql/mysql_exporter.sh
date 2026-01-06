@@ -21,6 +21,15 @@ declare -a TOOLS_TO_INSTALL=()
 GUM_VERSION="0.16.1"
 MYSQL_EXPORTER_VERSION="0.15.1"
 
+create_monc_config() {
+    mkdir -p ~/.config/monc > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/databases/mysql > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/endpoints/blackbox > /dev/null 2>&1
+    mkdir -p ~/.config/monc/exportsystems/node > /dev/null 2>&1
+    mkdir -p ~/.config/monc/store/prometheus > /dev/null 2>&1
+    mkdir -p ~/.config/monc/visualize/grafana > /dev/null 2>&1
+}
+
 ############################## pre functions #######################################
 check_system_compatibility() {
     # check for the package manager  
@@ -355,8 +364,10 @@ validate_port() {
 
     # docker published ports
     if command -v docker >/dev/null 2>&1; then
-        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${PORT}->"; then
-            gum log --level error "Port published by Docker"
+        if docker context ls --format '{{.Name}}' \
+            | xargs -I{} docker --context {} ps --format '{{.Ports}}' \
+            | grep -qE "(^|,|\s)(0\.0\.0\.0|\[::\]):${PORT}->"; then
+            gum log --level error "Port already published by Docker"
             return 1
         fi
     fi
@@ -732,6 +743,7 @@ install_service() {
 }
 
 manage_dependencies() {
+    create_monc_config
     check_system_compatibility
     check_and_install_script_dependencies
 }

@@ -18,6 +18,15 @@ declare -a TOOLS_TO_INSTALL=()
 GUM_VERSION="0.16.1"
 NODE_EXPORTER_VERSION="1.8.2"
 
+create_monc_config() {
+    mkdir -p ~/.config/monc > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/databases/mysql > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/endpoints/blackbox > /dev/null 2>&1
+    mkdir -p ~/.config/monc/exportsystems/node > /dev/null 2>&1
+    mkdir -p ~/.config/monc/store/prometheus > /dev/null 2>&1
+    mkdir -p ~/.config/monc/visualize/grafana > /dev/null 2>&1
+}
+
 ############################## pre functions #######################################
 check_system_compatibility() {
     # check for the package manager  
@@ -342,7 +351,9 @@ validate_port() {
 
     # docker published ports
     if command -v docker >/dev/null 2>&1; then
-        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${PORT}->"; then
+        if docker context ls --format '{{.Name}}' \
+            | xargs -I{} docker --context {} ps --format '{{.Ports}}' \
+            | grep -qE "(^|,|\s)(0\.0\.0\.0|\[::\]):${PORT}->"; then
             gum log --level error "Port already published by Docker"
             return 1
         fi
@@ -458,17 +469,6 @@ cleanup_on_failure() {
     sudo systemctl daemon-reload
 }
 
-manage_dependencies() {
-    check_system_compatibility
-    check_and_install_script_dependencies
-    check_and_ask_task_dependencies
-}
-
-get_inputs() {
-    ask_task
-    input_service
-    input_port
-}
 
 create_service_file() {
     if [[ ! -e template.service ]]; then
@@ -535,6 +535,19 @@ install_service() {
         gum log --level info "Service installed but not started"
         gum log --level info "To start: sudo systemctl start ${SERVICE}"
     fi
+}
+
+manage_dependencies() {
+    check_system_compatibility
+    create_monc_config
+    check_and_install_script_dependencies
+    check_and_ask_task_dependencies
+}
+
+get_inputs() {
+    ask_task
+    input_service
+    input_port
 }
 
 setup_service() {
