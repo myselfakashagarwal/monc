@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Define GUM_VERSION at the top
+GUM_VERSION="0.14.0"  # Set appropriate version
+
 check_system_compatibility() {
     # check for the package manager  
     PACKAGE_MANAGER=""
@@ -88,21 +91,27 @@ check_and_install_script_dependencies() {
         fi
     fi
     
+    if command -v git > /dev/null 2>&1; then
+        echo "git is already installed"
+    else
+        sudo $PACKAGE_MANAGER install -y git
+        gum log --level info "git installed successfully" > /dev/null
+    fi
+    
     # checking for config files for script if not found create it 
-    if [[ ! -d ~/.config/monc ]]; then
-        mkdir -p ~/.config/monc/exports/databases
-        mkdir -p ~/.config/monc/exports/databases/mysql
-        mkdir -p ~/.config/monc/exports/systems
-        mkdir -p ~/.config/monc/exports/systems/node
-        mkdir -p ~/.config/monc/exports/endpoints
-        mkdir -p ~/.config/monc/stores
-        mkdir -p ~/.config/monc/stores/prometheus
-        mkdir -p ~/.config/monc/visualizations
-        mkdir -p ~/.config/monc/visualizations/grafana
+        mkdir -p ~/.config/monc/export/databases/mysql > /dev/null
+        mkdir -p ~/.config/monc/export/systems/node > /dev/null
+        mkdir -p ~/.config/monc/export/endpoints/blackbox > /dev/null
+        mkdir -p ~/.config/monc/store/prometheus > /dev/null
+        mkdir -p ~/.config/monc/visualize/grafana > /dev/null
+    
+    if [[ ! -e ~/monc ]]; then 
+        git clone https://github.com/myselfakashagarwal/monc.git ~/monc
     fi
     
 }
 
+check_system_compatibility
 check_and_install_script_dependencies
 
 # Evaluating all options and arguments 
@@ -113,32 +122,104 @@ if [[ $NUMBER_OF_ARGUMENTS -eq 0 ]]; then
 else
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --init)
-          gum log --level info "You are ready to go!"
-          exit 0
-      shift 2
-      ;;
-      --help)
-          echo "
-
-          $> dstroman [OPTION] [ARGUMENT]
-
-          OPTION/FLAG         ARGUMENT        USECASE   
-          --init              <none>          To install dependencies & initialize configuration   
-
-          "
-          exit 0;
-      shift 2;
-      ;;
-      --list-exports)
-            DATABASES_EXPORTS=$(ls ~/.config/monc/exports/databases/mysql 2>/dev/null || true)
-            SYSTEMS_EXPORTS=$(ls ~/.config/monc/exports/systems/node 2>/dev/null || true)
-            ENDPOINTS_EXPORTS=$(ls ~/.config/monc/exports/endpoints 2>/dev/null || true)
-      ;;
-      *)
-        echo "Unknown option: $1"
-      shift 
-      ;;
+        --init)
+            gum log --level info "You are ready to go!"
+            shift
+            exit 0
+        ;;
+        --help)
+            shift
+        ;;
+        --create-export)
+            export_type=$(gum choose "mysql" "node" "blackbox")
+            if [[ $export_type == "mysql" ]]; then
+                bash ~/monc/export/databases/mysql/mysql_exporter.sh
+            elif [[ $export_type == "node" ]]; then
+                bash ~/monc/export/systems/node/node_exporter.sh
+            elif [[ $export_type == "blackbox" ]]; then
+                bash ~/monc/export/endpoints/blackbox/blackbox_exporter.sh
+            else 
+                gum log --level error "Invalid selection"
+            fi
+            shift
+        ;;
+        --remove-export)
+            export_type=$(gum choose "mysql" "node" "blackbox")
+            if [[ $export_type == "mysql" ]]; then
+                if [[ -z $(ls ~/.config/monc/export/databases/mysql) ]]; then
+                    gum log --level error "No MySQL exports found"
+                else
+                    export=$(gum choose $(ls ~/.config/monc/export/databases/mysql))
+                    if [[ -z $export ]]; then
+                        gum log --level error "No MySQL exports found"
+                    else
+                        gum confirm  "Are you sure you want to remove ${export}?" && {
+                            sudo systemctl stop "${export}" 2>/dev/null || true
+                            sudo systemctl disable "${export}" 2>/dev/null || true
+                            sudo rm -f "/etc/systemd/system/${export}.service"
+                            sudo systemctl daemon-reload
+                            sudo userdel -r "${export}" 2>/dev/null || true
+                            gum log --level info "Export removed: ${export}"
+                        }
+                    fi
+                fi
+            elif [[ $export_type == "node" ]]; then
+                if [[ -z $(ls ~/.config/monc/export/systems/node) ]]; then
+                    gum log --level error "No Node exports found"
+                else
+                    export=$(gum choose $(ls ~/.config/monc/export/systems/node))
+                    if [[ -z $export ]]; then
+                        gum log --level error "No Node exports found"
+                    else
+                        gum confirm  "Are you sure you want to remove ${export}?" && {
+                            sudo systemctl stop "${export}" 2>/dev/null || true
+                            sudo systemctl disable "${export}" 2>/dev/null || true
+                            sudo rm -f "/etc/systemd/system/${export}.service"
+                            sudo systemctl daemon-reload
+                            sudo userdel -r "${export}" 2>/dev/null || true
+                            gum log --level info "Export removed: ${export}"
+                        }
+                    fi
+                fi
+            elif [[ $export_type == "blackbox" ]]; then
+                if [[ -z $(ls ~/.config/monc/export/endpoints/blackbox) ]]; then
+                    gum log --level error "No Blackbox exports found"
+                else
+                    export=$(gum choose $(ls ~/.config/monc/export/endpoints/blackbox))
+                    if [[ -z $export ]]; then
+                        gum log --level error "No Blackbox exports found"
+                    else
+                        gum confirm "Are you sure you want to remove ${export}?" && {
+                            docker context use default
+                            docker kill "${export}_blackbox" 2>/dev/null || true
+                            docker kill "${export}_bconman" 2>/dev/null || true 
+                            docker rm "${export}_blackbox" 2>/dev/null || true
+                            docker rm "${export}_bconman" 2>/dev/null || true
+                            docker network rm "${export}_default" 2>/dev/null || true
+                            docker context rm "${export}" 2>/dev/null || true
+                            gum log --level info "Export removed: ${export}"
+                            sudo rm -r ~/.config/monc/export/endpoints/blackbox/${export}
+                        }
+                    fi
+                fi
+            else 
+                gum log --level error "Invalid selection"
+            fi
+            shift
+        ;;
+        --list-exports)
+            gum log --level info "mysql"
+            ls ~/.config/monc/export/databases/mysql | xargs echo 
+            gum log --level info "node"
+            ls ~/.config/monc/export/systems/node | xargs echo
+            gum log --level info "systems"
+            ls ~/.config/monc/export/endpoints/blackbox | xargs echo
+            exit 0;
+        ;;
+        *)
+            echo "Unknown option: $1"
+            shift 
+        ;;
     esac
   done
 fi

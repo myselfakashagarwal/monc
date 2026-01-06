@@ -22,7 +22,7 @@ create_monc_config() {
     mkdir -p ~/.config/monc > /dev/null 2>&1
     mkdir -p ~/.config/monc/export/databases/mysql > /dev/null 2>&1
     mkdir -p ~/.config/monc/export/endpoints/blackbox > /dev/null 2>&1
-    mkdir -p ~/.config/monc/exportsystems/node > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/systems/node > /dev/null 2>&1
     mkdir -p ~/.config/monc/store/prometheus > /dev/null 2>&1
     mkdir -p ~/.config/monc/visualize/grafana > /dev/null 2>&1
 }
@@ -535,6 +535,7 @@ install_service() {
         gum log --level info "Service installed but not started"
         gum log --level info "To start: sudo systemctl start ${SERVICE}"
     fi
+    rm template.service > /dev/null
 }
 
 manage_dependencies() {
@@ -555,6 +556,13 @@ setup_service() {
     install_service
 }
 
+store_info() {
+    touch ~/.config/monc/export/systems/node/$SERVICE
+    echo "somethig fucked up"
+    echo "PORT=$PORT" >> ~/.config/monc/export/systems/node/$SERVICE
+    echo "SERVICE=$SERVICE" >> ~/.config/monc/export/systems/node/$SERVICE
+}
+
 ################################ perform tasks #########################################
 
 perform_task() {
@@ -565,6 +573,7 @@ perform_task() {
     install_task_dependencies
     setup_service
     gum log --level info "✓ Service installation completed successfully!"
+    store_info
 }
 
 ########################## calls #########################################################

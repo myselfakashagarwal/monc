@@ -16,7 +16,7 @@ create_monc_config() {
     mkdir -p ~/.config/monc  
     mkdir -p ~/.config/monc/export/databases/mysql  
     mkdir -p ~/.config/monc/export/endpoints/blackbox  
-    mkdir -p ~/.config/monc/exportsystems/node  
+    mkdir -p ~/.config/monc/export/systems/node  
     mkdir -p ~/.config/monc/store/prometheus  
     mkdir -p ~/.config/monc/visualize/grafana  
 }
@@ -435,8 +435,8 @@ validate_port() {
 
     # docker published ports
     if command -v docker >/dev/null 2>&1; then
-        if docker context ls --format '{{.Name}}' 2>/dev/null \
-            | xargs -I{} docker --context {} ps --format '{{.Ports}}' 2>/dev/null \
+        if sudo docker context ls --format '{{.Name}}' 2>/dev/null \
+            | xargs -I{} sudo docker --context {} ps --format '{{.Ports}}' 2>/dev/null \
             | grep -qE "(^|,|\s)(0\.0\.0\.0|\[::\]):${PORT}->"; then
             gum log --level error "${PORT_NAME} already published by Docker"
             return 1
@@ -528,12 +528,12 @@ EOF
     gum log --level info "Creating and configuring Docker context..."
     
     # setup docker context and start compose
-    docker context use default > /dev/null 2>&1
-    docker context create $CONTEXT > /dev/null 2>&1
-    docker context use $CONTEXT > /dev/null 2>&1
+    sudo docker context use default > /dev/null 2>&1
+    sudo docker context create $CONTEXT > /dev/null 2>&1
+    sudo docker context use $CONTEXT > /dev/null 2>&1
     
     gum log --level info "Starting containers..."
-    docker compose -f bman.yml up -d
+    sudo docker compose -f bman.yml up -d
     
     gum log --level info "Setup completed successfully!"
 }

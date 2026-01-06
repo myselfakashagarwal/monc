@@ -25,7 +25,7 @@ create_monc_config() {
     mkdir -p ~/.config/monc > /dev/null 2>&1
     mkdir -p ~/.config/monc/export/databases/mysql > /dev/null 2>&1
     mkdir -p ~/.config/monc/export/endpoints/blackbox > /dev/null 2>&1
-    mkdir -p ~/.config/monc/exportsystems/node > /dev/null 2>&1
+    mkdir -p ~/.config/monc/export/systems/node > /dev/null 2>&1
     mkdir -p ~/.config/monc/store/prometheus > /dev/null 2>&1
     mkdir -p ~/.config/monc/visualize/grafana > /dev/null 2>&1
 }
@@ -740,6 +740,8 @@ install_service() {
         gum log --level info "Service installed but not started"
         gum log --level info "To start: sudo systemctl start ${SERVICE}"
     fi
+    
+    rm template.service > /dev/null
 }
 
 manage_dependencies() {
@@ -767,6 +769,12 @@ get_input() {
     input_mysql_password
 }
 
+store_info() {
+    touch ~/.config/monc/export/databases/mysql/$SERVICE
+    echo "PORT=$PORT" >> ~/.config/monc/export/databases/mysql/$SERVICE
+    echo "SERVICE=$SERVICE" >> ~/.config/monc/export/databases/mysql/$SERVICE
+}
+
 ################################ perform tasks #########################################
 
 perform_task() {
@@ -777,13 +785,6 @@ perform_task() {
     install_input_dependencies
     get_input
     test_mysql_connection
-    
-    # Log final configuration
-    gum log --level info "Configuration complete"
-    gum log --level info "Service: ${SERVICE}"
-    gum log --level info "Port: ${PORT}"
-    gum log --level info "MySQL: ${MYSQL_USER}@${MYSQL_HOST}:${MYSQL_PORT}"
-    
     install_task_dependencies
     setup_service
     gum log --level info "✓ Service installation completed successfully!"
