@@ -216,6 +216,67 @@ else
             ls ~/.config/monc/export/endpoints/blackbox | xargs echo
             exit 0;
         ;;
+        --create-store)
+            bash ~/monc/store/prometheus/prometheus.sh
+            exit 0;
+        ;;
+        --remove-store)
+            if [[ -z $(ls ~/.config/monc/store/prometheus 2>/dev/null) ]]; then
+                gum log --level error "No Prometheus stores found"
+            else
+                store=$(gum choose $(ls ~/.config/monc/store/prometheus))
+                if [[ -z $store ]]; then
+                    gum log --level error "No store selected"
+                else
+                    gum confirm "Are you sure you want to remove ${store}?" && {
+                        sudo docker context use default > /dev/null 2>&1
+                        sudo docker kill "${store}_prometheus" 2>/dev/null || true
+                        sudo docker rm "${store}_prometheus" 2>/dev/null || true
+                        sudo docker network rm "${store}_default" 2>/dev/null || true
+                        sudo docker context rm "${store}" 2>/dev/null || true
+                        sudo rm -r ~/.config/monc/store/prometheus/${store}
+                        gum log --level info "Store removed: ${store}"
+                    }
+                fi
+            fi
+            exit 0;
+        ;;
+        --list-stores)
+            gum log --level info "prometheus"
+            ls ~/.config/monc/store/prometheus 2>/dev/null | xargs echo
+            exit 0;
+        ;;
+        --create-visualize)
+            bash ~/monc/visualize/grafana/grafana.sh 
+            shift
+        ;;
+        --remove-visualize)
+            if [[ -z $(ls ~/.config/monc/visualize/grafana 2>/dev/null) ]]; then
+                gum log --level error "No Grafana visualizations found"
+            else
+                visualization=$(gum choose $(ls ~/.config/monc/visualize/grafana))
+                if [[ -z $visualization ]]; then
+                    gum log --level error "No visualization selected"
+                else
+                    gum confirm "Are you sure you want to remove ${visualization}?" && {
+                        sudo docker context use default > /dev/null 2>&1
+                        sudo docker kill "${visualization}_grafana" 2>/dev/null || true
+                        sudo docker rm "${visualization}_grafana" 2>/dev/null || true
+                        sudo docker network rm "${visualization}_default" 2>/dev/null || true
+                        sudo docker context rm "${visualization}" 2>/dev/null || true
+                        sudo rm -r ~/.config/monc/visualize/grafana/${visualization}
+                        gum log --level info "Visualization removed: ${visualization}"
+                    }
+                fi
+            fi
+            shift
+        ;;
+        --list-visualizations)
+            gum log --level info "grafana"
+            ls ~/.config/monc/visualize/grafana 2>/dev/null | xargs echo
+            shift
+            exit 0;
+        ;;
         *)
             echo "Unknown option: $1"
             shift 
