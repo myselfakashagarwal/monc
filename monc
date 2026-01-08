@@ -92,7 +92,7 @@ check_and_install_script_dependencies() {
     fi
     
     if command -v git > /dev/null 2>&1; then
-        echo "git is already installed"
+        echo "git is already installed" > /dev/null
     else
         sudo $PACKAGE_MANAGER install -y git
         gum log --level info "git installed successfully" > /dev/null
@@ -122,13 +122,23 @@ if [[ $NUMBER_OF_ARGUMENTS -eq 0 ]]; then
 else
   while [[ $# -gt 0 ]]; do
     case "$1" in
-        --init)
-            gum log --level info "You are ready to go!"
-            shift
-            exit 0
-        ;;
         --help)
-            shift
+        echo "
+monc [option]
+  Export 
+    --create-export             # Create a new export configuration
+    --remove-export             # Remove an existing export configuration
+    --list-exports              # List all export configurations
+  Store 
+    --create-store              # Create a new store configuration
+    --remove-store              # Remove an existing store configuration
+    --list-stores               # List all store configurations       
+  Visualization
+    --create-visualization      # Create a new visualization configuration
+    --remove-visualization      # Remove an existing visualization configuration
+    --list-visualizations       # List all visualization configurations
+"
+        exit 0;
         ;;
         --create-export)
             export_type=$(gum choose "mysql" "node" "blackbox")
@@ -141,7 +151,7 @@ else
             else 
                 gum log --level error "Invalid selection"
             fi
-            shift
+            exit 0;
         ;;
         --remove-export)
             export_type=$(gum choose "mysql" "node" "blackbox")
@@ -205,7 +215,7 @@ else
             else 
                 gum log --level error "Invalid selection"
             fi
-            shift
+            exit 0;
         ;;
         --list-exports)
             gum log --level info "mysql"
